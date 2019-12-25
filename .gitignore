@@ -1,0 +1,5 @@
+*.jpg
+*.jpeg
+*.so
+/out
+grapher
