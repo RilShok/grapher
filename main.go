@@ -10,30 +10,37 @@ import (
 )
 
 const (
-	LINE_COUNT      = 5000
-	POPULATION_SIZE = 50
-	EPOCH_COUNT     = 300000
-	SELECTION_LEVEL = 0.85
+	LINE_COUNT      = 7680 //2048
+	POPULATION_SIZE = 10
+	EPOCH_COUNT     = 100000
+	SELECTION_LEVEL = 0.6
+	LINE_VALUE      = 0.2 //интенсивность линии
+	BASE_LENGTH     = 12.
 )
 
 var (
-	MUTATION_LEVEL = float32(0.005)
+	MUTATION_LEVEL = float32(0.001)
 )
 
 func main() {
+
 	fmt.Println("hello")
 
 	floatImg, _ := NewImgFloat32(LoadImg("in.jpg"))
-	cuda.InitImageOnCuda(floatImg, LINE_COUNT)
+	//инициализация целевого изображения на GPU
+	cuda.InitImageOnCuda(floatImg, LINE_COUNT, LINE_VALUE)
 	defer cuda.DestroyImageOnCuda()
+
 	W, H := floatImg.Width(), floatImg.Height()
 	//SaveImg(floatImg.Image(), "gray.jpeg")
 
-	m_population := MakePopulation(floatImg)
+	//Создать популяцию
+	m_population := MakePopulation()
 
 	for i := 0; i < POPULATION_SIZE; i++ {
-		m_population.AddIndivid(NewIndividGenerate(LINE_COUNT, W, H))
+		m_population.AddIndivid(NewIndividGenerate(LINE_COUNT, W, H, BASE_LENGTH))
 	}
+
 	m_population.UpdateEstimate()
 
 	for epoch := 0; epoch < EPOCH_COUNT; epoch++ {
@@ -43,12 +50,12 @@ func main() {
 		m_population.UpdateEstimate()
 		bestIndivid, bestEstimate := m_population.BestIndivide()
 		fmt.Println("Epoch: ", epoch, "Err:", bestEstimate, "mutation:", MUTATION_LEVEL, "population_Size:", m_population.CountOfIndivids())
-		if epoch%10 == 0 {
+		if epoch%20 == 0 {
 			result := drawIndivide(W, H, bestIndivid)
 			//name := fmt.Sprintf("out/%d.jpeg", epoch)
 			name := "out/out.jpeg"
 			SaveImg(result.Image(), name)
-			//MUTATION_LEVEL = MUTATION_LEVEL * 0.99
+			//MUTATION_LEVEL = MUTATION_LEVEL * 0.999995
 		}
 
 	}
@@ -69,41 +76,33 @@ func drawIndivide(w, h uint, ind *individ) *ImgFloat32 {
 }
 
 type individ struct {
-	lines []LineFloat
+	lines *LineFloatArray
 }
 
-func NewIndivid() *individ {
+func NewIndividGenerate(count, w, h uint, base_length float32) *individ {
 	i := new(individ)
-	i.lines = make([]LineFloat, 0)
+	i.lines = GenerateRandomLineFloatArray(int(w), int(h), int(count), base_length)
 	return i
 }
 
-func NewIndividGenerate(count, w, h uint) *individ {
-	i := NewIndivid()
-	for k := uint(0); k < count; k++ {
-		line := GenerateLine(w, h, 5, 15)
-		line.SetValue(rand.Float32())
-		i.lines = append(i.lines, line)
-	}
+func ReproducIndivid(parent1, parent2 *individ) *individ {
+	i := new(individ)
+	i.lines = ReproduceLineFloatArray(parent1.lines, parent2.lines)
 	return i
 }
-func (i *individ) addLine(line LineFloat) {
-	i.lines = append(i.lines, line)
-}
-func (i *individ) Estimate(img *ImgFloat32) float64 {
-	return float64(cuda.EstimateLinesOnCuda(i.lines))
+
+func (i *individ) Estimate() float32 {
+	return cuda.EstimateLinesOnCuda(i.lines)
 	//!!!	return float64(img.CompareError(drawIndivide(img.Width(), img.Height(), i)))
 }
 
 type population struct {
-	img      *ImgFloat32
-	individs map[*individ]float64
+	individs map[*individ]float32
 }
 
-func MakePopulation(img *ImgFloat32) population {
+func MakePopulation() population {
 	var p population
-	p.img = img
-	p.individs = make(map[*individ]float64)
+	p.individs = make(map[*individ]float32)
 	return p
 }
 
@@ -111,18 +110,18 @@ func (p *population) AddIndivid(i *individ) {
 	if i == nil {
 		panic("individ is nil")
 	}
-	p.individs[i] = math.Inf(1)
+	p.individs[i] = float32(math.Inf(1))
 }
 
 func (p *population) UpdateEstimate() {
 	for individ, _ := range p.individs {
-		p.individs[individ] = individ.Estimate(p.img)
+		p.individs[individ] = individ.Estimate()
 	}
 }
 
-func (p *population) BestIndivide() (*individ, float64) {
+func (p *population) BestIndivide() (*individ, float32) {
 	var result *individ
-	resultEstimate := math.Inf(1)
+	resultEstimate := float32(math.Inf(1))
 	for individ, estimate := range p.individs {
 		if estimate < resultEstimate {
 			result = individ
@@ -134,7 +133,7 @@ func (p *population) BestIndivide() (*individ, float64) {
 
 func (p *population) WorseIndivide() *individ {
 	var result *individ
-	resultEstimate := 0.
+	resultEstimate := float32(0.)
 	for individ, estimate := range p.individs {
 		if estimate > resultEstimate {
 			result = individ
@@ -176,50 +175,31 @@ func (p *population) RandomIndivid() *individ {
 
 func (p *population) ReproduceTo(number int, mutation float32) {
 	//w, h := p.img.Width(), p.img.Height()
-	parent_individs := p.individs
-	rand_individ := func() *individ {
-		number := rand.Intn(len(parent_individs))
-		i := 0
-		for individ, _ := range parent_individs {
-			if i == number {
-				return individ
-			}
-			i++
-		}
-		panic("not found individ")
-	}
-	newPopulation := MakePopulation(p.img)
-	for newPopulation.CountOfIndivids() < number-p.CountOfIndivids() {
-		parent_individ_1 := rand_individ()
-		parent_individ_2 := rand_individ()
-		child_individ := NewIndivid()
-		//скрещивание. кроссинговер равномерный
-		for i := 0; i < len(parent_individ_1.lines) && i < len(parent_individ_2.lines); i++ {
-			if rand.Intn(2) == 0 {
-				child_individ.addLine(parent_individ_1.lines[i])
-			} else {
-				child_individ.addLine(parent_individ_2.lines[i])
-			}
+	parent_popuplation := MakePopulation()
+	parent_popuplation.individs = p.individs
+	//parent_popuplation.RandomIndivid()
 
-		}
+	newPopulation := MakePopulation()
+
+	for newPopulation.CountOfIndivids() < number-parent_popuplation.CountOfIndivids() {
+		parent_individ_1 := parent_popuplation.RandomIndivid()
+		parent_popuplation.killIndivid(parent_individ_1)
+		parent_individ_2 := parent_popuplation.RandomIndivid()
+		parent_popuplation.AddIndivid(parent_individ_1)
+
+		child_individ := ReproducIndivid(parent_individ_1, parent_individ_2)
+		//скрещивание. кроссинговер равномерный
+
 		newPopulation.AddIndivid(child_individ)
 	}
 	newPopulation.Mutation(mutation)
+
 	for individ, _ := range newPopulation.individs {
 		p.AddIndivid(individ)
 	}
 }
 func (p *population) Mutation(mutation float32) {
-	w, h := p.img.Width(), p.img.Height()
 	for individ, _ := range p.individs {
-		count_lines := len(individ.lines)
-		random_count_lines := int(mutation * float32(count_lines))
-		for i := 0; i < random_count_lines; i++ {
-			//if rand.Float32() < mutation {
-			idx := rand.Intn(count_lines)
-			individ.lines[idx].Mutate(w, h, 0.1)
-			//}
-
-		}
+		individ.lines.Mutate(mutation)
 	}
 }
