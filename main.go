@@ -10,52 +10,63 @@ import (
 )
 
 const (
-	LINE_COUNT      = 7680 //2048
 	POPULATION_SIZE = 10
-	EPOCH_COUNT     = 100000
+	EPOCH_COUNT     = 500000
 	SELECTION_LEVEL = 0.6
-	LINE_VALUE      = 0.2 //интенсивность линии
-	BASE_LENGTH     = 12.
+	LINE_VALUE      = 0.35 //0.35 //интенсивность линии
+
 )
 
 var (
-	MUTATION_LEVEL = float32(0.001)
+	LINE_COUNT     = 960 * 6
+	MUTATION_LEVEL = float32(0.0005)
+	BASE_LENGTH    = float32(18.)
 )
 
 func main() {
+	//открыть целевое изображение
+	targetImg, _ := NewImgFloat32(LoadImg("marlin.jpg"))
+	W, H := targetImg.Width(), targetImg.Height()
+	LINE_COUNT = int(float32(W*H)/BASE_LENGTH/2./LINE_VALUE) / 1024 * 1024
 
-	fmt.Println("hello")
-
-	floatImg, _ := NewImgFloat32(LoadImg("in.jpg"))
 	//инициализация целевого изображения на GPU
-	cuda.InitImageOnCuda(floatImg, LINE_COUNT, LINE_VALUE)
+	cuda.InitImageOnCuda(targetImg, LINE_COUNT, LINE_VALUE)
 	defer cuda.DestroyImageOnCuda()
-
-	W, H := floatImg.Width(), floatImg.Height()
-	//SaveImg(floatImg.Image(), "gray.jpeg")
 
 	//Создать популяцию
 	m_population := MakePopulation()
 
+	//Заполнить популяцию случайными линиями
 	for i := 0; i < POPULATION_SIZE; i++ {
-		m_population.AddIndivid(NewIndividGenerate(LINE_COUNT, W, H, BASE_LENGTH))
+		m_population.AddIndivid(NewIndividGenerate(uint(LINE_COUNT), W, H, BASE_LENGTH))
 	}
 
+	//оценить популяцию
 	m_population.UpdateEstimate()
 
 	for epoch := 0; epoch < EPOCH_COUNT; epoch++ {
-
+		//селекционный отбор в популяции
 		m_population.KillFewWorseIndivids(SELECTION_LEVEL)
+		//воспроизведение популяции. скрещевание
 		m_population.ReproduceTo(POPULATION_SIZE, MUTATION_LEVEL)
+		//оценить популяцию
 		m_population.UpdateEstimate()
+
+		//обработка промежуточных результатов
 		bestIndivid, bestEstimate := m_population.BestIndivide()
-		fmt.Println("Epoch: ", epoch, "Err:", bestEstimate, "mutation:", MUTATION_LEVEL, "population_Size:", m_population.CountOfIndivids())
-		if epoch%20 == 0 {
+		fmt.Println(
+			"Epoch: ", epoch,
+			"Err:", bestEstimate,
+			"mutation:", MUTATION_LEVEL,
+			"population_Size:", m_population.CountOfIndivids(),
+			"line count", LINE_COUNT,
+		)
+		if epoch%100 == 0 {
 			result := drawIndivide(W, H, bestIndivid)
-			//name := fmt.Sprintf("out/%d.jpeg", epoch)
-			name := "out/out.jpeg"
+			name := fmt.Sprintf("out/%d.jpg", epoch)
+			//name := "out/out.jpg"
 			SaveImg(result.Image(), name)
-			//MUTATION_LEVEL = MUTATION_LEVEL * 0.999995
+			SaveImg(result.Image(), "out.jpg")
 		}
 
 	}
@@ -67,12 +78,6 @@ func main() {
 
 func drawIndivide(w, h uint, ind *individ) *ImgFloat32 {
 	return cuda.DrawImageOnCuda(ind.lines)
-
-	//!!! result, _ := NewImgFloat32Blank(w, h)
-	//!!! for _, line := range ind.lines {
-	//!!! 	DrawLine(result, line, line.Value())
-	//!!! }
-	//!!! return result
 }
 
 type individ struct {
@@ -93,7 +98,6 @@ func ReproducIndivid(parent1, parent2 *individ) *individ {
 
 func (i *individ) Estimate() float32 {
 	return cuda.EstimateLinesOnCuda(i.lines)
-	//!!!	return float64(img.CompareError(drawIndivide(img.Width(), img.Height(), i)))
 }
 
 type population struct {
@@ -174,10 +178,8 @@ func (p *population) RandomIndivid() *individ {
 }
 
 func (p *population) ReproduceTo(number int, mutation float32) {
-	//w, h := p.img.Width(), p.img.Height()
 	parent_popuplation := MakePopulation()
 	parent_popuplation.individs = p.individs
-	//parent_popuplation.RandomIndivid()
 
 	newPopulation := MakePopulation()
 
@@ -188,7 +190,6 @@ func (p *population) ReproduceTo(number int, mutation float32) {
 		parent_popuplation.AddIndivid(parent_individ_1)
 
 		child_individ := ReproducIndivid(parent_individ_1, parent_individ_2)
-		//скрещивание. кроссинговер равномерный
 
 		newPopulation.AddIndivid(child_individ)
 	}

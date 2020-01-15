@@ -6,7 +6,6 @@ import (
 	"image/color"
 	"image/jpeg"
 
-	//"image/png"
 	"log"
 	"math"
 	"os"
@@ -43,7 +42,7 @@ type ImgFloat32 struct {
 	w, h uint
 }
 
-func (i *ImgFloat32) Data() *float32 {
+func (i *ImgFloat32) DataPointer() *float32 {
 	return &i.data[0]
 }
 
@@ -77,7 +76,6 @@ func NewImgFloat32Blank(width, hight uint) (*ImgFloat32, error) {
 }
 
 func NewImgFloat32(img image.Image) (*ImgFloat32, error) {
-
 	ans := new(ImgFloat32)
 	bounds := img.Bounds()
 	ans.w = uint(bounds.Dx())
@@ -86,11 +84,7 @@ func NewImgFloat32(img image.Image) (*ImgFloat32, error) {
 	for x := uint(0); x < ans.w; x++ {
 		for y := uint(0); y < ans.h; y++ {
 			r, g, b, _ := img.At(int(x), int(y)).RGBA()
-
 			ans.data[y*ans.w+x] = (.2126*float32(r) + .7152*float32(g) + .0722*float32(b)) / float32(math.MaxUint16)
-			// if (ans.data[y*ans.w+x]>0.8){
-			// 	log.Fatalln("!!!")
-			// }
 		}
 	}
 	return ans, nil
@@ -113,15 +107,16 @@ func (i *ImgFloat32) At(x, y uint) color.Color {
 	if v > 255. {
 		c = 255
 	}
-	//log.Println(i.data[y*i.w+x], v)
 	return color.RGBA{R: c, G: c, B: c, A: 255}
 }
 func (i *ImgFloat32) Get(x, y uint) float32 {
 	return i.data[y%i.h*i.w+x%i.w]
 }
+
 func (i *ImgFloat32) Height() uint {
 	return i.h
 }
+
 func (i *ImgFloat32) Width() uint {
 	return i.w
 }
